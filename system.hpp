@@ -63,7 +63,7 @@ struct SharedStorage {
     SharedStorage(unsigned int numberOfWorkers, unsigned int numberOfMachines, unsigned int clientTimeout,
                   std::unordered_map<std::string, unsigned int> machineIds)
         : signalForOrder(10, true), signalForProducts(10, true), signalForWork(3, true),
-        signalForClient(10, true), signalForReady(3, true),
+        signalForClient(10, true), signalForReady(30, true),
         workers(numberOfWorkers), machineIds(machineIds),
         isMachineWorking(numberOfMachines, true),
         isOutOfOrder(numberOfMachines, false), states(numberOfWorkers),
@@ -131,7 +131,34 @@ struct SharedStorage {
 
     std::vector<bool> signalForClient;
 
-    std::array<std::condition_variable, 3> forReady = {
+    std::array<std::condition_variable, 30> forReady = {
+        std::condition_variable(),
+        std::condition_variable(),
+        std::condition_variable(),
+        std::condition_variable(),
+        std::condition_variable(),
+        std::condition_variable(),
+        std::condition_variable(),
+        std::condition_variable(),
+        std::condition_variable(),
+        std::condition_variable(),
+        std::condition_variable(),
+        std::condition_variable(),
+        std::condition_variable(),
+        std::condition_variable(),
+        std::condition_variable(),
+        std::condition_variable(),
+        std::condition_variable(),
+        std::condition_variable(),
+        std::condition_variable(),
+        std::condition_variable(),
+        std::condition_variable(),
+        std::condition_variable(),
+        std::condition_variable(),
+        std::condition_variable(),
+        std::condition_variable(),
+        std::condition_variable(),
+        std::condition_variable(),
         std::condition_variable(),
         std::condition_variable(),
         std::condition_variable()
@@ -155,8 +182,9 @@ struct SharedStorage {
     // wszyscy klienci czekający (wywołali wait() lub wait(timeout) i są zawieszeni)
     std::unordered_set<unsigned int> waitingClients;
 
-    // niecierpliwi klienci czekający (wywołali wait(timeout) i są zawieszeni)
-    std::unordered_set<unsigned int> waitingClientsInHurry;
+    std::unordered_set<unsigned int> finishedOrders;
+    std::unordered_set<unsigned int> clientCollected;
+    std::unordered_set<unsigned int> workersWithProducts;
 
     unsigned int numberOfWorkers;
     unsigned int numberOfMachines;
@@ -181,13 +209,15 @@ public:
     void wait() const {
         {
             std::unique_lock<std::mutex> lock{s->mut};
+            std::cout << "CLIENT " << orderId << " IS WAITING" << std::endl;
+            if (s->finishedOrders.find(orderId) == s->finishedOrders.end()) {
+                s->waitingClients.insert(orderId);
+                s->signalForReady[orderId] = false;
+                s->forReady[orderId].wait(lock, [this] { return s->signalForReady[orderId] == true; });
 
-            s->waitingClients.insert(orderId);
-            s->signalForReady[orderId] = false;
-            s->forReady[orderId].wait(lock, [this] { return s->signalForReady[orderId] == true; });
-
-            s->waitingClients.erase(orderId);
-
+                s->waitingClients.erase(orderId);
+            }
+            std::cout << "CLIENT " << orderId << " WOKE UP" << std::endl;
             auto workerIter = s->orderToWorker.find(orderId);
 
             unsigned int workerId = workerIter->second;
@@ -202,12 +232,16 @@ public:
     void wait(unsigned int timeout) const {
         {
             std::unique_lock<std::mutex> lock{s->mut};
+            std::cout << "CLIENT " << orderId << " IS WAITING" << std::endl;
 
-            s->waitingClients.insert(orderId);
-            s->signalForReady[orderId] = false;
-            s->forReady[orderId].wait_for(lock, std::chrono::milliseconds(timeout), [this] { return s->signalForReady[orderId] == true; });
+            if (s->finishedOrders.find(orderId) == s->finishedOrders.end()) {
+                s->waitingClients.insert(orderId);
+                s->signalForReady[orderId] = false;
+                s->forReady[orderId].wait_for(lock, std::chrono::milliseconds(timeout), [this] { return s->signalForReady[orderId] == true; });
 
-            s->waitingClients.erase(orderId);
+                s->waitingClients.erase(orderId);
+            }
+            std::cout << "CLIENT " << orderId << " WOKE UP" << std::endl;
 
             auto workerIter = s->orderToWorker.find(orderId);
 
@@ -269,6 +303,8 @@ public:
         for (auto it = machineIds.begin(); it != machineIds.end(); it++) {
             machinesThrs.push_back(std::thread(&System::machineFun, this, it->second, it->first, machines.find(it->first)->second));
         }
+
+        while (s->nWorkersWaiting < numberOfWorkers || s->nMachinesWaiting < machines.size());
     }
 
     std::vector<WorkerReport> shutdown() {
@@ -421,6 +457,8 @@ public:
             }
 
             orderId = ++s->orderId;
+            s->pendingOrderIds.push_back(orderId);
+            s->pendingOrderDescs.push_back(products);
             s->newOrders.push(std::make_pair(orderId, products));
 
             std::cout << "ORDER END" << std::endl;
@@ -435,8 +473,6 @@ public:
                         unsigned int orderId = s->newOrders.front().first;
                         std::vector<std::string> orderDesc = s->newOrders.front().second;
 
-                        s->pendingOrderIds.push_back(orderId);
-                        s->pendingOrderDescs.push_back(orderDesc);
                         s->workers[i].orderId = orderId;
                         s->states[i] = State::IN_PROGRESS;
                         s->orderToWorker[orderId] = i;
@@ -504,6 +540,28 @@ public:
 
             std::cout << "COLLECT ORDER END" << std::endl;
 
+            s->clientCollected.insert(orderId);
+
+            // klient odbiera, więc można zamówienie usunąć z listy zamówień
+            if (s->pendingOrderIds.size() > 0) {
+                auto orderIdIter = s->pendingOrderIds.begin();
+                auto orderDescIter = s->pendingOrderDescs.begin();
+
+                while (orderIdIter != s->pendingOrderIds.end()) {
+                    if (*orderIdIter == s->workers[workerId].orderId) {
+                        break;
+                    }
+
+                    orderIdIter++;
+                    orderDescIter++;
+                }
+
+                if (orderIdIter != s->pendingOrderIds.end()) {
+                    s->pendingOrderIds.erase(orderIdIter);
+                    s->pendingOrderDescs.erase(orderDescIter);
+                }
+            }
+
             s->signalForClient[workerId] = true;
             lock.unlock();
             s->forClient[workerId].notify_one();
@@ -559,8 +617,6 @@ private:
                     unsigned int orderId = s->newOrders.front().first;
                     std::vector<std::string> orderDesc = s->newOrders.front().second;
 
-                    s->pendingOrderIds.push_back(orderId);
-                    s->pendingOrderDescs.push_back(orderDesc);
                     s->workers[workerId].orderId = orderId;
                     s->states[workerId] = State::IN_PROGRESS;
                     s->orderToWorker[orderId] = workerId;
@@ -589,8 +645,6 @@ private:
                     }
                 }
 
-                std::cout << "WORKER " << workerId << " WAITS FOR PRODUCTS" << std::endl;
-
                 // potokowe włączanie uśpionych maszyn
                 if (s->machinesToTurnOn.size() > 0) {
                     int nextMachineId = s->machinesToTurnOn.front();
@@ -600,13 +654,20 @@ private:
                     s->forWork[nextMachineId].notify_one();
                 }
             }
-
+            // maszyny mogą wyprzedzić pracownika i wyprodukować wszystko zanim się zawiesi
             {
                 std::unique_lock<std::mutex> lock{s->mut};
 
+                std::cout << "WORKER " << workerId << " WAITS FOR PRODUCTS" << std::endl;
+
                 // zawieszenie pracownika w oczekiwaniu na wszystkie produkty
-                s->signalForProducts[workerId] = false;
-                s->forProducts[workerId].wait(lock, [this, workerId] { return s->signalForProducts[workerId] == true; });
+                // O ILE JUŻ NIE ZOSTAŁY WYPRODUKOWANE
+                if (s->workersWithProducts.find(workerId) == s->workersWithProducts.end()) {
+                    s->signalForProducts[workerId] = false;
+                    s->forProducts[workerId].wait(lock, [this, workerId] { return s->signalForProducts[workerId] == true; });
+                }
+
+                s->workersWithProducts.erase(workerId);
 
                 if (s->states[workerId] != State::ERROR) {
                     s->states[workerId] = State::DONE;
@@ -616,53 +677,63 @@ private:
                     std::cout << "WORKER " << workerId << " DID NOT GET PRODUCTS" << std::endl;
                 }
 
+                s->finishedOrders.insert(s->workers[workerId].orderId);
+
                 s->signalForReady[s->workers[workerId].orderId] = true;
                 lock.unlock();
                 s->forReady[s->workers[workerId].orderId].notify_one();
             }
-
+            // klient może wyprzedzić pracownika i zrobić collect order zanim pracownik się zawiesi
             {
                 std::unique_lock<std::mutex> lock{s->mut};
 
-                // zamówienie zostało już przyjęte, więc można je usunąć z listy
-                if (s->pendingOrderIds.size() > 0) {
-                    auto orderIdIter = s->pendingOrderIds.begin();
-                    auto orderDescIter = s->pendingOrderDescs.begin();
-
-                    while (orderIdIter != s->pendingOrderIds.end()) {
-                        if (*orderIdIter == s->workers[workerId].orderId) {
-                            break;
-                        }
-
-                        orderIdIter++;
-                        orderDescIter++;
-                    }
-
-                    if (orderIdIter != s->pendingOrderIds.end()) {
-                        s->pendingOrderIds.erase(orderIdIter);
-                        s->pendingOrderDescs.erase(orderDescIter);
-                    }
-                }
-
                 if (s->states[workerId] == State::DONE) {
-                    std::cout << "WORKER " << workerId << " WAITS ON CLIENT" << std::endl;
+                    std::cout << "WORKER " << workerId << " WAITS ON CLIENT " << s->workers[workerId].orderId << std::endl;
 
                     // czekanie ileś czasu na odebranie przez klienta
-                    s->signalForClient[workerId] = false;
-
-                    if (s->forClient[workerId].wait_for(lock, std::chrono::milliseconds(s->clientTimeout), [this, workerId] { return s->signalForClient[workerId] == true; })) {
+                    // O ILE JUŻ NIE PRZYSZEDŁ !!!
+                    if (s->clientCollected.find(s->workers[workerId].orderId) != s->clientCollected.end()) {
                         std::cout << "WORKER " << workerId << " CLIENT CAME" << std::endl;
                         s->workers[workerId].report.collectedOrders.push_back(s->workers[workerId].names);
+                        // usunięcie zamówienia odbyło się w collectOrder
                     } else {
-                        std::cout << "WORKER " << workerId << " CLIENT DID NOT COME" << std::endl;
-                        s->states[workerId] = State::TIMEOUT;
+                        s->signalForClient[workerId] = false;
 
-                        // zwrot
-                        for (size_t i = 0; i < s->workers[workerId].products.size(); i++) {
-                            s->workers[workerId].products[i].first->returnProduct(std::move(s->workers[workerId].products[i].second));
+                        if (s->forClient[workerId].wait_for(lock, std::chrono::milliseconds(s->clientTimeout), [this, workerId] { return s->signalForClient[workerId] == true; })) {
+                            std::cout << "WORKER " << workerId << " CLIENT CAME" << std::endl;
+                            s->workers[workerId].report.collectedOrders.push_back(s->workers[workerId].names);
+                            // usunięcie zamówienia odbyło się w collectOrder
+                        } else {
+                            std::cout << "WORKER " << workerId << " CLIENT DID NOT COME" << std::endl;
+                            s->states[workerId] = State::TIMEOUT;
+
+                            // zwrot
+                            for (size_t i = 0; i < s->workers[workerId].products.size(); i++) {
+                                s->workers[workerId].products[i].first->returnProduct(std::move(s->workers[workerId].products[i].second));
+                            }
+
+                            s->workers[workerId].report.abandonedOrders.push_back(s->workers[workerId].names);
+
+                            // minął termin zamówienia, więc można je usunąć z listy
+                            if (s->pendingOrderIds.size() > 0) {
+                                auto orderIdIter = s->pendingOrderIds.begin();
+                                auto orderDescIter = s->pendingOrderDescs.begin();
+
+                                while (orderIdIter != s->pendingOrderIds.end()) {
+                                    if (*orderIdIter == s->workers[workerId].orderId) {
+                                        break;
+                                    }
+
+                                    orderIdIter++;
+                                    orderDescIter++;
+                                }
+
+                                if (orderIdIter != s->pendingOrderIds.end()) {
+                                    s->pendingOrderIds.erase(orderIdIter);
+                                    s->pendingOrderDescs.erase(orderDescIter);
+                                }
+                            }
                         }
-
-                        s->workers[workerId].report.abandonedOrders.push_back(s->workers[workerId].names);
                     }
                 } else {
                     std::cout << "WORKER " << workerId << " RETURNS PRODUCTS BECAUSE OF MACHINE(S) ERROR(S)" << std::endl;
@@ -672,6 +743,26 @@ private:
                     }
 
                     s->workers[workerId].report.failedOrders.push_back(s->workers[workerId].names);
+
+                    // minął termin zamówienia, więc można je usunąć z listy
+                    if (s->pendingOrderIds.size() > 0) {
+                        auto orderIdIter = s->pendingOrderIds.begin();
+                        auto orderDescIter = s->pendingOrderDescs.begin();
+
+                        while (orderIdIter != s->pendingOrderIds.end()) {
+                            if (*orderIdIter == s->workers[workerId].orderId) {
+                                break;
+                            }
+
+                            orderIdIter++;
+                            orderDescIter++;
+                        }
+
+                        if (orderIdIter != s->pendingOrderIds.end()) {
+                            s->pendingOrderIds.erase(orderIdIter);
+                            s->pendingOrderDescs.erase(orderDescIter);
+                        }
+                    }
                 }
             }
         }
@@ -772,6 +863,8 @@ private:
 
                 if (s->workers[workerId].nProductsWaiting == 0) {
                     std::cout << "MACHINE " << name << " WAKES WORKER " << workerId << std::endl;
+                    s->workersWithProducts.insert(workerId);
+
                     s->signalForProducts[workerId] = true;
                     lock.unlock();
                     s->forProducts[workerId].notify_one();
