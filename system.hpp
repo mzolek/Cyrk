@@ -3,6 +3,7 @@
 
 #include <exception>
 #include <vector>
+#include <deque>
 #include <list>
 #include <queue>
 #include <unordered_map>
@@ -62,112 +63,41 @@ struct Worker {
 struct SharedStorage {
     SharedStorage(unsigned int numberOfWorkers, unsigned int numberOfMachines, unsigned int clientTimeout,
                   std::unordered_map<std::string, unsigned int> machineIds)
-        : signalForOrder(10, true), signalForProducts(10, true), signalForWork(3, true),
-        signalForClient(10, true), signalForReady(30, true),
+        : signalForBegin(false), signalForEnd(true), signalForOrder(numberOfWorkers, true), signalForProducts(numberOfWorkers, true),
+        signalForWork(numberOfMachines, true), signalForClient(numberOfWorkers, true),
         workers(numberOfWorkers), machineIds(machineIds),
         isMachineWorking(numberOfMachines, true),
         isOutOfOrder(numberOfMachines, false), states(numberOfWorkers),
         queuesToMachines(numberOfMachines), numberOfWorkers(numberOfWorkers),
         numberOfMachines(numberOfMachines), nWorkersWaiting(0), nMachinesWaiting(0),
         clientTimeout(clientTimeout), orderId(0), closed(false), closing(false) {
+
+        for (int i = 0; i < numberOfWorkers; i++) {
+            forOrder.emplace_back();
+            forProducts.emplace_back();
+            forClient.emplace_back();
+        }
+
+        for (int i = 0; i < numberOfMachines; i++) {
+            forWork.emplace_back();
+        }
     }
 
     std::mutex mut;
-
+    std::condition_variable forBegin;
+    bool signalForBegin;
     std::condition_variable forEnd;
-
-    bool signalForEnd = true;
-
-    std::array<std::condition_variable, 10> forOrder = {
-        std::condition_variable(),
-        std::condition_variable(),
-        std::condition_variable(),
-        std::condition_variable(),
-        std::condition_variable(),
-        std::condition_variable(),
-        std::condition_variable(),
-        std::condition_variable(),
-        std::condition_variable(),
-        std::condition_variable()
-    };
-
+    bool signalForEnd;
+    std::deque<std::condition_variable> forOrder;
     std::vector<bool> signalForOrder;
-
-    std::array<std::condition_variable, 10> forProducts = {
-        std::condition_variable(),
-        std::condition_variable(),
-        std::condition_variable(),
-        std::condition_variable(),
-        std::condition_variable(),
-        std::condition_variable(),
-        std::condition_variable(),
-        std::condition_variable(),
-        std::condition_variable(),
-        std::condition_variable()
-    };
-
+    std::deque<std::condition_variable> forProducts;
     std::vector<bool> signalForProducts;
-
-    std::array<std::condition_variable, 3> forWork = {
-        std::condition_variable(),
-        std::condition_variable(),
-        std::condition_variable()
-    };
-
+    std::deque<std::condition_variable> forWork;
     std::vector<bool> signalForWork;
-
-    std::array<std::condition_variable, 10> forClient = {
-        std::condition_variable(),
-        std::condition_variable(),
-        std::condition_variable(),
-        std::condition_variable(),
-        std::condition_variable(),
-        std::condition_variable(),
-        std::condition_variable(),
-        std::condition_variable(),
-        std::condition_variable(),
-        std::condition_variable()
-    };
-
+    std::deque<std::condition_variable> forClient;
     std::vector<bool> signalForClient;
-
-    std::array<std::condition_variable, 32> forReady = {
-        std::condition_variable(),
-        std::condition_variable(),
-        std::condition_variable(),
-        std::condition_variable(),
-        std::condition_variable(),
-        std::condition_variable(),
-        std::condition_variable(),
-        std::condition_variable(),
-        std::condition_variable(),
-        std::condition_variable(),
-        std::condition_variable(),
-        std::condition_variable(),
-        std::condition_variable(),
-        std::condition_variable(),
-        std::condition_variable(),
-        std::condition_variable(),
-        std::condition_variable(),
-        std::condition_variable(),
-        std::condition_variable(),
-        std::condition_variable(),
-        std::condition_variable(),
-        std::condition_variable(),
-        std::condition_variable(),
-        std::condition_variable(),
-        std::condition_variable(),
-        std::condition_variable(),
-        std::condition_variable(),
-        std::condition_variable(),
-        std::condition_variable(),
-        std::condition_variable(),
-        std::condition_variable(),
-        std::condition_variable()
-    };
-
+    std::deque<std::condition_variable> forReady;
     std::vector<bool> signalForReady;
-
     std::unordered_set<unsigned int> takenOrders;
     std::unordered_map<unsigned int, unsigned int> orderToWorker;
     std::vector<Worker> workers;
@@ -180,14 +110,10 @@ struct SharedStorage {
     std::vector<unsigned int> pendingOrderIds;
     std::vector<std::vector<std::string>> pendingOrderDescs;
     std::queue<std::pair<unsigned int, std::vector<std::string>>> newOrders;
-
-    // wszyscy klienci czekający (wywołali wait() lub wait(timeout) i są zawieszeni)
     std::unordered_set<unsigned int> waitingClients;
-
     std::unordered_set<unsigned int> finishedOrders;
     std::unordered_set<unsigned int> clientCollected;
     std::unordered_set<unsigned int> workersWithProducts;
-
     unsigned int numberOfWorkers;
     unsigned int numberOfMachines;
     unsigned int nWorkersWaiting;
@@ -202,12 +128,6 @@ struct SharedStorage {
 
 class CoasterPager {
 public:
-    CoasterPager(std::shared_ptr<SharedStorage> s, unsigned int orderId)
-        : orderId(orderId) {
-
-        this->s = s;
-    }
-
     void wait() const {
         {
             std::unique_lock<std::mutex> lock{s->mut};
@@ -280,6 +200,8 @@ public:
 private:
     std::shared_ptr<SharedStorage> s;
     unsigned int orderId;
+
+    friend class System;
 };
 
 class System {
@@ -306,7 +228,10 @@ public:
             machinesThrs.push_back(std::thread(&System::machineFun, this, it->second, it->first, machines.find(it->first)->second));
         }
 
-        while (s->nWorkersWaiting < numberOfWorkers || s->nMachinesWaiting < machines.size()); // DO POPRAWY !!!
+        {
+            std::unique_lock<std::mutex> lock{s->mut};
+            s->forBegin.wait(lock, [this] { return s->signalForBegin == true; });
+        }
     }
 
     std::vector<WorkerReport> shutdown() {
@@ -458,7 +383,9 @@ public:
                 }
             }
 
-            orderId = ++s->orderId;
+            orderId = s->orderId++;
+            s->forReady.emplace_back();
+            s->signalForReady.push_back(true);
             s->pendingOrderIds.push_back(orderId);
             s->pendingOrderDescs.push_back(products);
             s->newOrders.push(std::make_pair(orderId, products));
@@ -494,7 +421,7 @@ public:
             }
         }
 
-        return std::make_unique<CoasterPager>(s, orderId);
+        return makeCoasterPager(s, orderId);
     }
 
     std::vector<std::unique_ptr<Product>> collectOrder(std::unique_ptr<CoasterPager> CoasterPager) {
@@ -583,7 +510,17 @@ public:
         return clientTimeout;
     }
 private:
+    std::unique_ptr<CoasterPager> makeCoasterPager(std::shared_ptr<SharedStorage> s, unsigned int orderId) {
+        std::unique_ptr<CoasterPager> coasterPager = std::make_unique<CoasterPager>();
+        coasterPager->s = s;
+        coasterPager->orderId = orderId;
+
+        return std::move(coasterPager);
+    }
+
     void workerFun(int workerId) {
+        bool firstTime = true;
+
         while (true) {
             {
                 std::unique_lock<std::mutex> lock{s->mut};
@@ -603,6 +540,13 @@ private:
                         s->forEnd.notify_one();
                         return;
                     }
+
+                    if (firstTime && s->nWorkersWaiting == s->numberOfWorkers && s->nMachinesWaiting == s->numberOfMachines) {
+                        s->signalForBegin = true;
+                        s->forBegin.notify_one();
+                    }
+
+                    firstTime = false;
 
                     s->signalForOrder[workerId] = false;
                     s->forOrder[workerId].wait(lock, [this, workerId] { return s->signalForOrder[workerId] == true; });
@@ -772,6 +716,7 @@ private:
 
     void machineFun(unsigned int machineId, std::string name, std::shared_ptr<Machine> machine) {
         int workerId;
+        bool firstTime = true;
 
         machine->start();
 
@@ -792,6 +737,13 @@ private:
                         s->forEnd.notify_one();
                         return;
                     }
+
+                    if (firstTime && s->nWorkersWaiting == s->numberOfWorkers && s->nMachinesWaiting == s->numberOfMachines) {
+                        s->signalForBegin = true;
+                        s->forBegin.notify_one();
+                    }
+
+                    firstTime = false;
 
                     s->signalForWork[machineId] = false;
                     s->forWork[machineId].wait(lock, [this, machineId] { return s->signalForWork[machineId] == true; });
