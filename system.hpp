@@ -72,13 +72,13 @@ struct SharedStorage {
         numberOfMachines(numberOfMachines), nWorkersWaiting(0), nMachinesWaiting(0),
         clientTimeout(clientTimeout), orderId(0), closed(false), closing(false) {
 
-        for (int i = 0; i < numberOfWorkers; i++) {
+        for (unsigned int i = 0; i < numberOfWorkers; i++) {
             forOrder.emplace_back();
             forProducts.emplace_back();
             forClient.emplace_back();
         }
 
-        for (int i = 0; i < numberOfMachines; i++) {
+        for (unsigned int i = 0; i < numberOfMachines; i++) {
             forWork.emplace_back();
         }
     }
@@ -131,7 +131,7 @@ public:
     void wait() const {
         {
             std::unique_lock<std::mutex> lock{s->mut};
-            //std::cout << "CLIENT " << orderId << " IS WAITING" << std::endl;
+            std::cout << "CLIENT " << orderId << " IS WAITING" << std::endl;
             if (s->finishedOrders.find(orderId) == s->finishedOrders.end()) {
                 s->waitingClients.insert(orderId);
                 s->signalForReady[orderId] = false;
@@ -139,7 +139,7 @@ public:
 
                 s->waitingClients.erase(orderId);
             }
-            //std::cout << "CLIENT " << orderId << " WOKE UP" << std::endl;
+            std::cout << "CLIENT " << orderId << " WOKE UP" << std::endl;
             auto workerIter = s->orderToWorker.find(orderId);
 
             unsigned int workerId = workerIter->second;
@@ -154,7 +154,7 @@ public:
     void wait(unsigned int timeout) const {
         {
             std::unique_lock<std::mutex> lock{s->mut};
-            //std::cout << "CLIENT " << orderId << " IS WAITING" << std::endl;
+            std::cout << "CLIENT " << orderId << " IS WAITING" << std::endl;
 
             if (s->finishedOrders.find(orderId) == s->finishedOrders.end()) {
                 s->waitingClients.insert(orderId);
@@ -163,7 +163,7 @@ public:
 
                 s->waitingClients.erase(orderId);
             }
-            //std::cout << "CLIENT " << orderId << " WOKE UP" << std::endl;
+            std::cout << "CLIENT " << orderId << " WOKE UP" << std::endl;
 
             auto workerIter = s->orderToWorker.find(orderId);
 
@@ -239,12 +239,12 @@ public:
 
         {
             std::unique_lock<std::mutex> lock{s->mut};
-            //std::cout << s->nWorkersWaiting << ' ' << s->nMachinesWaiting << std::endl;
+            std::cout << s->nWorkersWaiting << ' ' << s->nMachinesWaiting << std::endl;
             if (s->nWorkersWaiting == s->numberOfWorkers && s->nMachinesWaiting == s->numberOfMachines) {
                 s->closing = true;
                 s->closed = true;
 
-                //std::cout << "SHUTDOWN 1" << std::endl;
+                std::cout << "SHUTDOWN 1" << std::endl;
 
                 for (size_t i = 0; i < workersThrs.size(); i++) {
                     s->signalForOrder[i] = true;
@@ -265,7 +265,7 @@ public:
                 s->signalForEnd = false;
                 s->forEnd.wait(lock, [this] { return s->signalForEnd == true; });
 
-                //std::cout << "SHUTDOWN 2" << std::endl;
+                std::cout << "SHUTDOWN 2" << std::endl;
 
                 s->closed = true;
 
@@ -318,13 +318,13 @@ public:
                 }
             }
 
-            //std::cout << "GET MENU BEGIN" << std::endl;
-            //std::cout << "  ";
+            std::cout << "GET MENU BEGIN" << std::endl;
+            std::cout << "  ";
             for (size_t i = 0; i < menu.size(); i++) {
-                //std::cout << menu[i] << ' ';
+                std::cout << menu[i] << ' ';
             }
-            //std::cout << std::endl;
-            //std::cout << "GET MENU END" << std::endl;
+            std::cout << std::endl;
+            std::cout << "GET MENU END" << std::endl;
 
         }
 
@@ -339,13 +339,13 @@ public:
 
             pendingOrders = s->pendingOrderIds;
 
-            //std::cout << "PENDING ORDERS BEGIN" << std::endl;
-            //std::cout << "  ";
+            std::cout << "PENDING ORDERS BEGIN" << std::endl;
+            std::cout << "  ";
             for (size_t i = 0; i < s->pendingOrderIds.size(); i++) {
-                //std::cout << s->pendingOrderIds[i] << ' ';
+                std::cout << s->pendingOrderIds[i] << ' ';
             }
-            //std::cout << std::endl;
-            //std::cout << "PENDING ORDERS END" << std::endl;
+            std::cout << std::endl;
+            std::cout << "PENDING ORDERS END" << std::endl;
 
         }
 
@@ -359,10 +359,10 @@ public:
         {
             std::unique_lock<std::mutex> lock{s->mut};
 
-            //std::cout << "ORDER BEGIN" << std::endl; for (size_t i = 0; i < products.size(); i++) { //std::cout << products[i] << ' '; } //std::cout << std::endl;
+            std::cout << "ORDER BEGIN" << std::endl; for (size_t i = 0; i < products.size(); i++) { std::cout << products[i] << ' '; } std::cout << std::endl;
 
             if (s->closing) {
-                //std::cout << "  RESTAURANT CLOSED" << std::endl;
+                std::cout << "  RESTAURANT CLOSED" << std::endl;
                 lock.unlock();
                 throw RestaurantClosedException();
             }
@@ -373,11 +373,11 @@ public:
                 }
             }
 
-            //std::cout << "  MENU" << std::endl; //std::cout << "  "; for (size_t i = 0; i < menu.size(); i++) { //std::cout << menu[i] << ' '; } //std::cout << std::endl;
+            std::cout << "  MENU" << std::endl; std::cout << "  "; for (size_t i = 0; i < menu.size(); i++) { std::cout << menu[i] << ' '; } std::cout << std::endl;
 
             for (std::string product : products) {
                 if (std::find(menu.begin(), menu.end(), product) == menu.end()) {
-                    //std::cout << "  BAD ORDER" << std::endl;
+                    std::cout << "  BAD ORDER" << std::endl;
                     lock.unlock();
                     throw BadOrderException();
                 }
@@ -390,14 +390,14 @@ public:
             s->pendingOrderDescs.push_back(products);
             s->newOrders.push(std::make_pair(orderId, products));
 
-            //std::cout << "ORDER END" << std::endl;
+            std::cout << "ORDER END" << std::endl;
 
             if (s->nWorkersWaiting > 0) {
                 unsigned int i = 0;
 
                 while (i < s->numberOfWorkers) {
                     if (s->signalForOrder[i] == false) {
-                        //std::cout << "BUDZONY: " << i << std::endl;
+                        std::cout << "BUDZONY: " << i << std::endl;
 
                         unsigned int orderId = s->newOrders.front().first;
                         std::vector<std::string> orderDesc = s->newOrders.front().second;
@@ -430,31 +430,38 @@ public:
         {
             std::unique_lock<std::mutex> lock{s->mut};
 
-            //std::cout << "COLLECT ORDER BEGIN" << std::endl;
+            std::cout << "COLLECT ORDER BEGIN" << std::endl;
 
             unsigned int orderId = CoasterPager->getId();
+
+            if (s->orderToWorker.find(orderId) == s->orderToWorker.end()) {
+                std::cout << "  ORDER NOT READY" << std::endl;
+                lock.unlock();
+                throw OrderNotReadyException();
+            }
+
             unsigned int workerId = s->orderToWorker.find(orderId)->second;
 
             if (s->states[workerId] == State::ERROR) {
-                //std::cout << "  FULFILLMENT FAILURE" << std::endl;
+                std::cout << "  FULFILLMENT FAILURE" << std::endl;
                 lock.unlock();
                 throw FulfillmentFailure();
             }
 
             if (s->states[workerId] == State::IN_PROGRESS) {
-                //std::cout << "  ORDER NOT READY" << std::endl;
+                std::cout << "  ORDER NOT READY" << std::endl;
                 lock.unlock();
                 throw OrderNotReadyException();
             }
 
             if (s->states[workerId] == State::TIMEOUT) {
-                //std::cout << "  ORDER EXPIRED" << std::endl;
+                std::cout << "  ORDER EXPIRED" << std::endl;
                 lock.unlock();
                 throw OrderExpiredException();
             }
 
             if (s->takenOrders.find(orderId) != s->takenOrders.end()) {
-                //std::cout << "  BAD PAGER" << std::endl;
+                std::cout << "  BAD PAGER" << std::endl;
                 lock.unlock();
                 throw BadPagerException();
             }
@@ -467,7 +474,7 @@ public:
                 products.emplace_back(std::move(s->workers[workerId].products[i].second));
             }
 
-            //std::cout << "COLLECT ORDER END" << std::endl;
+            std::cout << "COLLECT ORDER END" << std::endl;
 
             s->clientCollected.insert(orderId);
 
@@ -514,8 +521,7 @@ private:
         std::unique_ptr<CoasterPager> coasterPager = std::make_unique<CoasterPager>();
         coasterPager->s = s;
         coasterPager->orderId = orderId;
-
-        return std::move(coasterPager);
+        return coasterPager;
     }
 
     void workerFun(int workerId) {
@@ -524,17 +530,17 @@ private:
         while (true) {
             {
                 std::unique_lock<std::mutex> lock{s->mut};
-                //std::cout << "WORKER " << workerId << " NEW ORDERS SIZE1 " << s->newOrders.size() << std::endl;
+                std::cout << "WORKER " << workerId << " NEW ORDERS SIZE1 " << s->newOrders.size() << std::endl;
                 // jeśli nie ma nowych zamówień pracownik jest zawieszany
                 if (s->newOrders.size() == 0) {
-                    //std::cout << "WORKER " << workerId << " WAITS FOR ORDER" << std::endl;
+                    std::cout << "WORKER " << workerId << " WAITS FOR ORDER" << std::endl;
 
                     s->nWorkersWaiting++;
 
                     if (s->closing && s->nWorkersWaiting == s->numberOfWorkers && s->nMachinesWaiting == s->numberOfMachines) {
                         s->informatorId = workerId;
                         s->informatorType = Type::WORKER;
-                        //std::cout << "WORKER " << workerId << " INFORMATOR" << std::endl;
+                        std::cout << "WORKER " << workerId << " INFORMATOR" << std::endl;
                         s->signalForEnd = true;
                         lock.unlock();
                         s->forEnd.notify_one();
@@ -552,7 +558,7 @@ private:
                     s->forOrder[workerId].wait(lock, [this, workerId] { return s->signalForOrder[workerId] == true; });
 
                     if (s->closed) {
-                        //std::cout << "WORKER " << workerId << " ENDED" << std::endl;
+                        std::cout << "WORKER " << workerId << " ENDED" << std::endl;
                         lock.unlock();
                         return;
                     }
@@ -572,9 +578,9 @@ private:
                     s->newOrders.pop();
                 }
 
-                //std::cout << "WORKER " << workerId << " NEW ORDERS SIZE2 " << s->newOrders.size() << std::endl;
+                std::cout << "WORKER " << workerId << " NEW ORDERS SIZE2 " << s->newOrders.size() << std::endl;
 
-                //std::cout << "WORKER " << workerId << " GOT ORDER" << std::endl; for (size_t i = 0; i < s->workers[workerId].names.size(); i++) { //std::cout << s->workers[workerId].names[i] << ' '; } //std::cout << std::endl;
+                std::cout << "WORKER " << workerId << " GOT ORDER" << std::endl; for (size_t i = 0; i < s->workers[workerId].names.size(); i++) { std::cout << s->workers[workerId].names[i] << ' '; } std::cout << std::endl;
 
                 std::unordered_set<unsigned int> distinctMachineIds;
 
@@ -604,7 +610,7 @@ private:
             {
                 std::unique_lock<std::mutex> lock{s->mut};
 
-                //std::cout << "WORKER " << workerId << " WAITS FOR PRODUCTS" << std::endl;
+                std::cout << "WORKER " << workerId << " WAITS FOR PRODUCTS" << std::endl;
 
                 // zawieszenie pracownika w oczekiwaniu na wszystkie produkty
                 // O ILE JUŻ NIE ZOSTAŁY WYPRODUKOWANE
@@ -618,9 +624,9 @@ private:
                 if (s->states[workerId] != State::ERROR) {
                     s->states[workerId] = State::DONE;
 
-                    //std::cout << "WORKER " << workerId << " GOT PRODUCTS SUCCESSFULLY" << std::endl;
+                    std::cout << "WORKER " << workerId << " GOT PRODUCTS SUCCESSFULLY" << std::endl;
                 } else {
-                    //std::cout << "WORKER " << workerId << " DID NOT GET PRODUCTS" << std::endl;
+                    std::cout << "WORKER " << workerId << " DID NOT GET PRODUCTS" << std::endl;
                 }
 
                 s->finishedOrders.insert(s->workers[workerId].orderId);
@@ -634,23 +640,23 @@ private:
                 std::unique_lock<std::mutex> lock{s->mut};
 
                 if (s->states[workerId] == State::DONE) {
-                    //std::cout << "WORKER " << workerId << " WAITS ON CLIENT " << s->workers[workerId].orderId << std::endl;
+                    std::cout << "WORKER " << workerId << " WAITS ON CLIENT " << s->workers[workerId].orderId << std::endl;
 
                     // czekanie ileś czasu na odebranie przez klienta
                     // O ILE JUŻ NIE PRZYSZEDŁ !!!
                     if (s->clientCollected.find(s->workers[workerId].orderId) != s->clientCollected.end()) {
-                        //std::cout << "WORKER " << workerId << " CLIENT CAME" << std::endl;
+                        std::cout << "WORKER " << workerId << " CLIENT CAME" << std::endl;
                         s->workers[workerId].report.collectedOrders.push_back(s->workers[workerId].names);
                         // usunięcie zamówienia odbyło się w collectOrder
                     } else {
                         s->signalForClient[workerId] = false;
 
                         if (s->forClient[workerId].wait_for(lock, std::chrono::milliseconds(s->clientTimeout), [this, workerId] { return s->signalForClient[workerId] == true; })) {
-                            //std::cout << "WORKER " << workerId << " CLIENT CAME" << std::endl;
+                            std::cout << "WORKER " << workerId << " CLIENT CAME" << std::endl;
                             s->workers[workerId].report.collectedOrders.push_back(s->workers[workerId].names);
                             // usunięcie zamówienia odbyło się w collectOrder
                         } else {
-                            //std::cout << "WORKER " << workerId << " CLIENT DID NOT COME" << std::endl;
+                            std::cout << "WORKER " << workerId << " CLIENT DID NOT COME" << std::endl;
                             s->states[workerId] = State::TIMEOUT;
 
                             // zwrot
@@ -682,7 +688,7 @@ private:
                         }
                     }
                 } else {
-                    //std::cout << "WORKER " << workerId << " RETURNS PRODUCTS BECAUSE OF MACHINE(S) ERROR(S)" << std::endl;
+                    std::cout << "WORKER " << workerId << " RETURNS PRODUCTS BECAUSE OF MACHINE(S) ERROR(S)" << std::endl;
                     // zwrot
                     for (size_t i = 0; i < s->workers[workerId].products.size(); i++) {
                         s->workers[workerId].products[i].first->returnProduct(std::move(s->workers[workerId].products[i].second));
@@ -725,7 +731,7 @@ private:
                 std::unique_lock<std::mutex> lock{s->mut};
 
                 if (s->queuesToMachines[machineId].size() == 0) {
-                    //std::cout << "MACHINE " << name << " WAITS FOR TURN ON" << std::endl;
+                    std::cout << "MACHINE " << name << " WAITS FOR TURN ON" << std::endl;
                     s->isMachineWorking[machineId] = false;
                     s->nMachinesWaiting++;
 
@@ -749,17 +755,17 @@ private:
                     s->forWork[machineId].wait(lock, [this, machineId] { return s->signalForWork[machineId] == true; });
 
                     if (s->closed) {
-                        //std::cout << "MACHINE " << name << " ENDED" << std::endl;
+                        std::cout << "MACHINE " << name << " ENDED" << std::endl;
                         machine->stop();
                         lock.unlock();
                         return;
                     }
 
-                    //std::cout << "MACHINE " << name << " WAS TURNED ON" << std::endl;
+                    std::cout << "MACHINE " << name << " WAS TURNED ON" << std::endl;
                     s->isMachineWorking[machineId] = true;
                     s->nMachinesWaiting--;
                     workerId = s->queuesToMachines[machineId].front();
-                    //std::cout << "MACHINE " << name << " WORK FOR WORKER " << workerId << std::endl;
+                    std::cout << "MACHINE " << name << " WORK FOR WORKER " << workerId << std::endl;
                     s->queuesToMachines[machineId].pop();
 
                     // potokowe włączanie uśpionych maszyn
@@ -772,7 +778,7 @@ private:
                     }
                 } else {
                     workerId = s->queuesToMachines[machineId].front();
-                    //std::cout << "MACHINE " << name << " WORK FOR WORKER " << workerId << std::endl;
+                    std::cout << "MACHINE " << name << " WORK FOR WORKER " << workerId << std::endl;
                     s->queuesToMachines[machineId].pop();
                 }
             }
@@ -811,12 +817,12 @@ private:
                     s->pendingOrderDescs = pendingOrderDescs;
                 }
 
-                //std::cout << "MACHINE " << name << " PRODUCED (" << produced << ") FOR WORKER " << workerId << std::endl;
+                std::cout << "MACHINE " << name << " PRODUCED (" << produced << ") FOR WORKER " << workerId << std::endl;
 
                 s->workers[workerId].nProductsWaiting--;
 
                 if (s->workers[workerId].nProductsWaiting == 0) {
-                    //std::cout << "MACHINE " << name << " WAKES WORKER " << workerId << std::endl;
+                    std::cout << "MACHINE " << name << " WAKES WORKER " << workerId << std::endl;
                     s->workersWithProducts.insert(workerId);
 
                     s->signalForProducts[workerId] = true;
