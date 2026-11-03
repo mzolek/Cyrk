@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Valgrind
+        run: sudo apt-get update && sudo apt-get install -y valgrind
+
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug
+
+      - name: Build
+        run: cmake --build build -j
+
+      - name: Unit tests
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Valgrind
+        run: valgrind --leak-check=full --error-exitcode=1 ./build/cyrk_tests
+
+  thread-sanitizer:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # ThreadSanitizer nie działa przy domyślnej entropii ASLR na nowszych jądrach Linuksa
+      - name: Reduce ASLR entropy
+        run: sudo sysctl vm.mmap_rnd_bits=28
+
+      - name: Configure (ThreadSanitizer)
+        run: cmake -S . -B build-tsan -DCMAKE_BUILD_TYPE=Debug -DCYRK_TSAN=ON
+
+      - name: Build
+        run: cmake --build build-tsan -j
+
+      - name: Unit tests
+        run: ctest --test-dir build-tsan --output-on-failure
